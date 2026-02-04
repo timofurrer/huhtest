@@ -5,7 +5,8 @@ import (
 	"io"
 	"slices"
 	"strings"
-	"time"
+	"time",
+	"sync"
 
 	testingi "github.com/mitchellh/go-testing-interface"
 )
@@ -84,6 +85,8 @@ type Responder struct {
 	latestQuestion          string
 	latestQuestionMatchType questionMatchType
 	latestResponse          *response
+	// testMu synchronizes access to testing.T methods from goroutines
+	testMu sync.Mutex
 
 	// debug can be flipped to increase debugging in the Start method
 	debug bool
@@ -312,6 +315,9 @@ func (r *Responder) Start(t testingi.T, timeout time.Duration) (*io.PipeReader, 
 
 	// Avoids having to put if-statements everywhere
 	log := func(input ...any) {
+		r.testMu.Lock()
+		defer r.testMu.Unlock()
+
 		// If the test has already failed, we could cause a panic
 		if r.debug && !t.Failed() {
 			t.Log(input...)
@@ -333,7 +339,9 @@ func (r *Responder) Start(t testingi.T, timeout time.Duration) (*io.PipeReader, 
 
 				answer, err := response.pickAnswer()
 				if err != nil {
+					r.testMu.Lock()
 					t.Error(err)
+					r.testMu.Unlock()
 				}
 
 				answer += response.submitCharacter()
@@ -358,7 +366,9 @@ func (r *Responder) Start(t testingi.T, timeout time.Duration) (*io.PipeReader, 
 
 	go func() {
 		time.Sleep(timeout)
+		r.testMu.Lock()
 		t.Error("Deadline reached, closing readers and writers")
+		r.testMu.Unlock()
 		closer()
 	}()
 
